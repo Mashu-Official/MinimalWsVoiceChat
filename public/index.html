@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebSocket 语音通话 Demo</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.js" integrity="sha512-8BHxHDLsOHx+flIrQ0DrZcea7MkHqRU5GbTHmbdzMRnAaoCIkZ97PqZcXJkKZckMMhqfoeaJE+DNUVuyoQsO3Q==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+<h1>WebSocket 语音通话 Demo</h1>
+
+<!-- 本地音频播放 -->
+<audio id="localAudio" controls></audio>
+<!--<audio id="localAudio" controls autoplay></audio>-->
+<!-- 远程音频播放 -->
+<audio id="remoteAudio" controls autoplay></audio>
+
+<script>
+  const socket = io();
+
+  // 设置 MediaStream
+  let localStream;
+  const constraints = {
+    audio: {
+      sampleRate: 384000,
+      autoGainControl: true, // 启用自动增益控制
+      echoCancellation: true, // 启用回声消除
+      noiseSuppression: true, // 启用噪声抑制
+    },
+  };
+
+  // 获取本地音频流
+  navigator.mediaDevices.getUserMedia(constraints)
+          .then(stream => {
+            localStream = stream;
+            const audioTracks = stream.getAudioTracks();
+            console.log('Using audio device: ' + audioTracks[0].label);
+
+            // 播放本地音频流
+            const localAudioElement = document.getElementById('localAudio');
+            localAudioElement.srcObject = localStream;
+
+            // 获取音频数据流后再调用 sendAudio()
+            sendAudio();
+          })
+          .catch(error => {
+            console.error('Error accessing media devices.', error);
+          });
+
+  // 发送音频流到服务器
+  const sendAudio = () => {
+    if (!localStream) {
+      console.error("No audio stream available");
+      return;
+    }
+
+    const mediaRecorder = new MediaRecorder(localStream);
+    const chunks = [];
+
+    // 录制音频并通过 WebSocket 发送
+    mediaRecorder.ondataavailable = event => {
+      chunks.push(event.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'audio/wav' });
+      const arrayBuffer = blob.arrayBuffer();
+      arrayBuffer.then(buffer => {
+        socket.emit('audio-stream', buffer); // 发送音频数据
+      });
+    };
+
+    // 开始录音
+    mediaRecorder.start(500); // 每秒发送一次音频数据
+
+    // 停止录音
+    setTimeout(() => {
+      mediaRecorder.stop();
+      sendAudio()
+    }, 500); // 停止录音后1秒
+
+
+
+  };
+  // 监听其他客户端的音频数据
+  socket.on('audio-stream', (arrayBuffer) => {
+    const audioContext = new AudioContext();
+    audioContext.decodeAudioData(arrayBuffer)
+            .then(buffer => {
+              const audioSource = audioContext.createBufferSource();
+              audioSource.buffer = buffer;
+              audioSource.connect(audioContext.destination);
+              audioSource.start();
+            })
+            .catch(error => {
+              console.error("Error decoding audio data", error);
+            });
+  });
+</script>
+</body>
+</html>
